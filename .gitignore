@@ -136,4 +136,4 @@ GitHub.sublime-settings
 .history
 
 # Users data from bot
-user_data/
+*_data.json
