@@ -1,3 +1,6 @@
+# Users data from bot
+*_data.json
+
 # Django #
 *.log
 *.pot
@@ -134,6 +137,3 @@ GitHub.sublime-settings
 !.vscode/launch.json 
 !.vscode/extensions.json 
 .history
-
-# Users data from bot
-*_data.json
