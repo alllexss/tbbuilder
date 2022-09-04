@@ -157,6 +157,13 @@ class BotEngine:
                                 text=f"<b>{step_name}</b>: <i>{user_msg['contact']}</i>",
                                 parse_mode="html"
                             )
+                        elif "location" in user_msg:
+                            self.bot.send_message(chat_id=admin_id, text=f"<b>{step_name}: [LOCATION]</b>", parse_mode="html")
+                            self.bot.send_location(
+                                chat_id=admin_id,
+                                latitude=user_msg['location']['lat'],
+                                longitude=user_msg['location']['long'],
+                            )
                 elif type(message) is str:
                     self.bot.send_message(chat_id=admin_id, text=message, parse_mode="html")
 
@@ -378,21 +385,36 @@ class BotEngine:
             if self.show_user_data(message)["Step-Messaging"]:
                 self.step_messaging_logic(message=message, content={"contact": message.contact.phone_number})
 
+    def init_location_messaging_operations(self):
+        "Init all messaging logic from base messaging logic method. For Step-Messaging it using another logic method."
+        @self.bot.message_handler(content_types=['location'])
+        def message_hadler(message):
+            self.update_bot_config()
+            self.check_user_directories(message=message)
+            if self.show_user_data(message)["Step-Messaging"]:
+                self.step_messaging_logic(message=message, content={
+                        "location": {
+                            "lat": message.location.latitude,
+                            "long": message.location.longitude
+                        }
+                    })
+
     def prepare(self):
         """Preparing config and messaging logic"""
         self.update_bot_config()
         self.init_command_messaging_operations()
         self.init_text_messaging_operations()
         self.init_photo_messaging_operations()
-        self.init_contact_messaging_operations()
         self.init_voice_messaging_operations()
+        self.init_contact_messaging_operations()
+        self.init_location_messaging_operations()
 
     def start_bot_in_thread(self):
         """Preparing everything what program need and start bot in thread (self.bot_thread) for manipulation"""
 
         self.prepare()
 
-        # To resolve pyTelegramBotAPI bug with launching, steal this part of code
+        # If you want to fix pyTelegramBotAPI bug with launching, steal this part of code
         try:
             self.bot_thread
         except AttributeError:
