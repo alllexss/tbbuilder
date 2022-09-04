@@ -3,6 +3,7 @@ from . import models
 import nested_admin
 
 
+# Step Messaging models registration
 class StepMessagingTextAdmin(nested_admin.NestedStackedInline):
     model = models.StepMessagingText
     extra = 1
@@ -21,19 +22,19 @@ class StepMessagingStepAdmin(nested_admin.NestedStackedInline):
     inlines = [StepMessagingTextAdmin, StepMessagingMediaAdmin, StepMessagingButtonsUserAdmin]
 
 
-
+# Last Messaging models registrations
 class LastMessageTextAdmin(nested_admin.NestedStackedInline):
     model = models.LastMessageText
-    extra = 1
+    extra = 0
 
 class LastMessageMediaAdmin(nested_admin.NestedStackedInline):
     model = models.LastMessageMedia
-    extra = 1
+    extra = 0
 
 
 class LastMessageButtonsUserAdmin(nested_admin.NestedStackedInline):
     model = models.LastMessageButtonsUser
-    extra = 1
+    extra = 0
 
 class LastMessageConfigAdmin(nested_admin.NestedStackedInline):
     model = models.LastMessageConfig

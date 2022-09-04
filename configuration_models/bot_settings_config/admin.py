@@ -20,15 +20,4 @@ class BotAPIAdmin(admin.ModelAdmin):
         return False
 
 
-@admin.register(models.BotSettings)
-class BotSettingsAdmin(admin.ModelAdmin):
-    model = models.BotSettings
-
-    def has_add_permission(self, request, obj=None):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        return False
-
-
 admin.site.register(models.AdminTelegramID)

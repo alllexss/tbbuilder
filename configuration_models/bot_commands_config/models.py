@@ -1,6 +1,6 @@
 from django.db import models
 from os.path import basename
-import configuration_models.bot_settings_config.models as bot_settings_model
+import configuration_models.bot_settings_config.models as settings_model
 
 
 class CommandsConfig(models.Model):
@@ -18,7 +18,7 @@ class CommandsConfig(models.Model):
     def save(self, *args, **kwargs):
         self.name = self.name.replace("/", "")
         super().save(*args, **kwargs)
-        bot_settings_model.generate_bot_config()
+        settings_model.bot_config_generator.generate_config()
 
 
 class CommandText(models.Model):

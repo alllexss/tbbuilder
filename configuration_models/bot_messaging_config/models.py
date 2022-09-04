@@ -1,6 +1,6 @@
 from django.db import models
 from os.path import basename
-import configuration_models.bot_settings_config.models as bot_settings_model
+import configuration_models.bot_settings_config.models as settings_model
 
 
 class MessagingConfig(models.Model):
@@ -17,7 +17,7 @@ class MessagingConfig(models.Model):
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
-        bot_settings_model.generate_bot_config()
+        settings_model.bot_config_generator.generate_config()
 
 
 class MessagingText(models.Model):
@@ -34,7 +34,7 @@ class MessagingText(models.Model):
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
-        bot_settings_model.generate_bot_config()
+        settings_model.bot_config_generator.generate_config()
 
 
 class MessagingMedia(models.Model):
@@ -51,7 +51,7 @@ class MessagingMedia(models.Model):
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
-        bot_settings_model.generate_bot_config()
+        settings_model.bot_config_generator.generate_config()
 
 
 class MessagingButtonsUser(models.Model):
@@ -72,6 +72,5 @@ class MessagingButtonsUser(models.Model):
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
-        bot_settings_model.generate_bot_config()
-
+        settings_model.bot_config_generator.generate_config()
 

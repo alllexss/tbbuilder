@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 
-from ast import Index
 import os
 import json
+import shutil
 import telebot
 import threading
 
 BOT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), "config.json")
 USERS_DATA_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), "user_data/")
+USERS_MEDIA_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), "../media/users-media-files/")
 
 class BotEngine:
     def __init__(self):
         self.bot_config = {}
         self.bot = None
+        self.bot_config_path = BOT_CONFIG_PATH
+        self.users_data_path = USERS_DATA_PATH
 
     def show_user_data(self, message):
         """Return specific user data, depending on chat_id"""
@@ -21,7 +24,6 @@ class BotEngine:
 
     def change_user_data(self, message, key_value={}):
         """Change specific key in user data, depending on chat id, using json"""
-            
         if len(key_value) > 0:
             with open(os.path.join(USERS_DATA_PATH, f"{message.chat.id}/{message.chat.id}_data.json"), 'rb') as user_data_rb:
                 user_data = json.load(user_data_rb)
@@ -39,10 +41,11 @@ class BotEngine:
             "Username": message.from_user.username if message.from_user.username else "",
             "Phone-Number": None,
             "Location": None,
-            "Step-Enabled": False,
+            "Step-Messaging": False,
             "Step-Name": None,
+            "Step-Messaging-Title": None,
             "Start-Step-Message": None,
-            "Last-Step": False,
+            "Send-Last-Step-Message": False,
             "Step-Result": {
                 # Step Messaging Title: {
                 #   Step name: {user_answer: user_answer_type(text/media/etc...)}
@@ -59,7 +62,17 @@ class BotEngine:
             os.mkdir(os.path.join(USERS_DATA_PATH, str(message.chat.id)))
             with open(os.path.join(USERS_DATA_PATH, f"{message.chat.id}/{message.chat.id}_data.json"), 'w') as user_data_w:
                 json.dump(user_base_data, user_data_w)
-        
+
+        # Create user_media_directory if need
+        if os.path.exists(USERS_MEDIA_PATH):
+            if not os.path.exists(os.path.join(USERS_MEDIA_PATH, str(message.chat.id))):
+                os.mkdir(os.path.join(USERS_MEDIA_PATH, str(message.chat.id)))
+        else:
+            os.mkdir(USERS_MEDIA_PATH)
+            os.mkdir(os.path.join(USERS_MEDIA_PATH, str(message.chat.id)))
+
+    def clean_user_media_directory(self, chat_id):
+        shutil.rmtree(os.path.join(USERS_MEDIA_PATH, str(chat_id)))
 
     def update_bot_config(self, key_value={}):
         """Update bot configuration file, using json"""
@@ -78,12 +91,11 @@ class BotEngine:
         if buttons_config:
             buttons_config = buttons_config[0]
             buttons_list = []
-
             # Initialisation list of buttons
             for text, type in buttons_config.items():
-                if text != "" or text is not None:
+                if text is not None and text.strip() != '' and text != '':
                     buttons_list.append(telebot.types.KeyboardButton(
-                            text=text, 
+                            text=text.strip(), 
                             request_contact=True if type == "phone" else False, 
                             request_location=True if type == "location" else False
                         )
@@ -110,199 +122,270 @@ class BotEngine:
     def send_steps_to_admin(self, step_messaging_title, step_result):
         """Sending step data from user to the administrator IDs"""
 
-        text = f"<b>Attention!</b> A new user completed the step-messaging. <i>Title of Step-Messaging</i>: <b>{step_messaging_title}.</b> \n<i>Here's a user messages:</i>\n"
+        messages_for_admin = [
+            f"<b>Attention!</b> A new user completed the step-messaging. \n<i>Title of Step-Messaging</i>: <b>{step_messaging_title}.</b> \n\n<i>Here's a user's replies:</i>",
+        ]
+
         for step_name, user_msg in step_result[step_messaging_title].items():
-            text += f"\n{step_name}: {user_msg}"
+            if type(user_msg) is dict:
+                messages_for_admin.append({step_name: user_msg})
+            else:
+                messages_for_admin.append(f"\n<b>{step_name}</b>: {user_msg}")
 
         for admin_id in self.bot_config["Administrator-IDs"]:
-            self.bot.send_message(chat_id=admin_id, text=text, parse_mode="html")
+            for message in messages_for_admin:
+                if type(message) is dict:
+                    for step_name, user_msg in message.items():
+                        if "photo" in user_msg:
+                            with open(user_msg["photo"], 'rb') as pic: 
+                                self.bot.send_photo(chat_id=admin_id, photo=pic, caption=step_name)
+                        elif "voice" in user_msg:
+                            with open(user_msg["voice"], 'rb') as voice: 
+                                self.bot.send_voice(chat_id=admin_id, voice=voice, caption=step_name)
+                        elif "audio" in user_msg:
+                            with open(user_msg["audio"], 'rb') as audio: 
+                                self.bot.send_audio(chat_id=admin_id, audio=audio, caption=step_name)
+                        elif "video" in user_msg:
+                            with open(user_msg["video"], 'rb') as video: 
+                                self.bot.send_video(chat_id=admin_id, video=video, caption=step_name)
+                        elif "document" in user_msg:
+                            with open(user_msg["document"], 'rb') as doc: 
+                                self.bot.send_document(chat_id=admin_id, document=doc, caption=step_name)
+                        elif "contact" in user_msg:
+                            self.bot.send_message(
+                                chat_id=admin_id, 
+                                text=f"<b>{step_name}</b>: <i>{user_msg['contact']}</i>",
+                                parse_mode="html"
+                            )
+                elif type(message) is str:
+                    self.bot.send_message(chat_id=admin_id, text=message, parse_mode="html")
 
-        pass
-
-    def update_step_results(self, message, step_messaging_title, step_data):
-        """This method will update a new values into user data files, contains step-result information"""
-        with open(os.path.join(USERS_DATA_PATH, f"{message.chat.id}/{message.chat.id}_data.json"), 'rb') as user_data_rb:
-            user_data = json.load(user_data_rb)
-
-        for step_name, user_answer in step_data.items():
-            user_data["Step-Result"][step_messaging_title][step_name] = user_answer
-        with open(os.path.join(USERS_DATA_PATH, f"{message.chat.id}/{message.chat.id}_data.json"), 'w') as user_data_w:
-            json.dump(user_data, user_data_w)
-
-    def messaging_logic(self, message, config_key, user_message):
-        """Base messaging logic, using in telebot handlers."""
-        for obj in self.bot_config[config_key]:
-            # If user message exists in bot config file
-            if obj == user_message:
+    def base_messaging_logic(self, message, specific_content):
+        # Init user buttons markup
+        markup = self.init_buttons_markup(specific_content["user_buttons"])
+        if len(specific_content["bot_media"]) > 0:
+            if not specific_content["media_first"]:
                 
-                markup = self.init_buttons_markup(self.bot_config[config_key][obj]["user_buttons"])
-                
-                # Check bot steps by order depending on sending message type
-                if len(self.bot_config[config_key][obj]["bot_media"]) > 0:
-                    if not self.bot_config[config_key][obj]["media_first"]:
-                        
-                        # Send text if text is first
-                        self.bot.reply_to(message, self.bot_config[config_key][obj]["bot_text"], reply_markup=markup)
-
-                        if self.bot_config[config_key][obj]["bot_additional_text"]:
-                            for msg in self.bot_config[config_key][obj]["bot_additional_text"]:
-                                self.bot.send_message(chat_id=message.chat.id, text=msg, reply_markup=markup)
-                    
-                    # Media files sending logic
-                    for media_file_path, caption in self.bot_config[config_key][obj]["bot_media"].items():
-                        media_file_extension = os.path.splitext(media_file_path)[-1]
-                        with open(media_file_path, "rb") as media_file_rb:
-                            if media_file_extension in [".jpg", ".png", ".jpeg"]:
-                                self.bot.send_photo(chat_id=message.chat.id, photo=media_file_rb, caption=caption)
-                            elif media_file_extension in [".mp4", ".mov", ".webm"]:
-                                self.bot.send_video(chat_id=message.chat.id, video=media_file_rb, caption=caption)
-                            else:
-                                self.bot.send_document(chat_id=message.chat.id, document=media_file_rb, caption=caption)
-
-                    # Send text if it didn't sended, because media sended first   
-                    if self.bot_config[config_key][obj]["media_first"]:
-                        self.bot.reply_to(message, self.bot_config[config_key][obj]["bot_text"], reply_markup=markup)
-
-                        if self.bot_config[config_key][obj]["bot_additional_text"]:
-                            for msg in self.bot_config[config_key][obj]["bot_additional_text"]:
-                                self.bot.send_message(chat_id=message.chat.id, text=msg, reply_markup=markup)
+                # Send text if text is first
+                if type(specific_content["bot_text"]) == list:
+                    for text in specific_content["bot_text"]:
+                        self.bot.send_message(message.chat.id, text, reply_markup=markup)
                 else:
-                    # Send text if media list is empty
-                    self.bot.reply_to(message, self.bot_config[config_key][obj]["bot_text"], reply_markup=markup)
+                    self.bot.send_message(message.chat.id, specific_content["bot_text"], reply_markup=markup)
 
-                    if self.bot_config[config_key][obj]["bot_additional_text"]:
-                        for msg in self.bot_config[config_key][obj]["bot_additional_text"]:
-                            self.bot.send_message(chat_id=message.chat.id, text=msg, reply_markup=markup)
-
-    def step_messaging_logic(self, message):
-        """This method has all logic for step messaging. Use it on bot.message_handler (s)"""
-        start_message = self.show_user_data(message)["Step-Start-Message"]
                 
-        # Creating first step if need
-        if self.show_user_data(message)["Step-Name"] is None:
-            first_step_name = list(self.bot_config["Step-Messaging"][start_message].keys())[0]
-            for start_message in self.bot_config["Step-Messaging"]:
-                if start_message == message.text.strip():
-                    print(first_step_name)
-                    self.change_user_data(message, key_value={
-                            "Step-Result": {
-                                self.bot_config["Step-Messaging"][start_message][first_step_name]["step_messaging_title"]: {} 
-                            },
-                            "Step-Name": first_step_name
-                        }
-                    )
+            # Media files sending logic
+            for media_file_path, caption in specific_content["bot_media"].items():
+                media_file_extension = os.path.splitext(media_file_path)[-1]
+                with open(media_file_path, "rb") as media_file_rb:
+                    if media_file_extension in [".jpg", ".png", ".jpeg"]:
+                        self.bot.send_photo(chat_id=message.chat.id, photo=media_file_rb, caption=caption, reply_markup=markup)
+                    elif media_file_extension in [".mp4", ".mov", ".webm"]:
+                        self.bot.send_video(chat_id=message.chat.id, video=media_file_rb, caption=caption, reply_markup=markup)
+                    else:
+                        self.bot.send_document(chat_id=message.chat.id, document=media_file_rb, caption=caption, reply_markup=markup)
 
-        for step_name in self.bot_config["Step-Messaging"][start_message]:
+            # Send text if it didn't sended, because media sended first   
+            if specific_content["media_first"]:
+                if type(specific_content["bot_text"]) == list:
+                    for text in specific_content["bot_text"]:
+                        self.bot.send_message(message.chat.id, text, reply_markup=markup)
+                else:
+                    self.bot.send_message(message.chat.id, specific_content["bot_text"], reply_markup=markup)
+        else:
+            # Send text if media list is empty
+            if type(specific_content["bot_text"]) == list:
+                for text in specific_content["bot_text"]:
+                    self.bot.send_message(message.chat.id, text, reply_markup=markup)
+            else:
+                self.bot.send_message(message.chat.id, specific_content["bot_text"], reply_markup=markup)
+
+    def step_messaging_logic(self, message, content={}):
+        """This method has all logic for step messaging. Use it on bot.message_handler (s)"""
+
+        title = self.show_user_data(message)["Step-Messaging-Title"]
+        start_message = self.show_user_data(message)["Start-Step-Message"]
+        
+
+        for step_name in self.bot_config["Step-Messaging"][title][start_message]:
 
             # Check user active step
             if step_name == self.show_user_data(message)["Step-Name"]:
-                step_messaging_title = self.bot_config["Step-Messaging"][start_message][step_name]["step_messaging_title"]
-
-                # Init user buttons markup
-                markup = self.init_buttons_markup(self.bot_config["Step-Messaging"][start_message][step_name]["user_buttons"])
                 
-                # Check bot steps by order depending on sending message type
-                if len(self.bot_config["Step-Messaging"][start_message][step_name]["bot_media"]) > 0:
+                # If this step messaging not finished
+                if not self.show_user_data(message)["Send-Last-Step-Message"]:
                     
-                    if not self.bot_config["Step-Messaging"][start_message][step_name]["media_first"]:
+                    # Update information for administrators from user messages
+                    if self.bot_config["Step-Messaging"][title][start_message][step_name]["send_to_admin"]:
                         
-                        # Send text if text is first
-                        for text in self.bot_config["Step-Messaging"][start_message][step_name]["bot_text"]:
-                            self.bot.send_message(message.chat.id, text, reply_markup=markup)
+                        # If content from specific messages handlers exists, save it as result
+                        user_data = self.show_user_data(message=message)
+                        if content:
+                            user_data["Step-Result"][title][step_name] = content
+                            self.change_user_data(message, key_value=user_data)
+                        # If not, save user message as result
+                        else:
+                            user_data["Step-Result"][title][step_name] = message.text.strip()
+                            self.change_user_data(message, key_value=user_data)
+
+                        # If it'a a last step - stop step messaging.If not, change step name in user data
+                        if step_name == list(self.bot_config["Step-Messaging"][title][start_message].keys())[-1]:
+                            self.change_user_data(message=message, key_value={
+                                    "Send-Last-Step-Message": True
+                                }
+                            )
+                        else:
+                            if message is not None and content or message.text.strip() != start_message:
+                                # Add next step into user-data
+                                next_step = ""
+                                step_list = list(self.bot_config["Step-Messaging"][title][start_message].keys())
+                                for index, key in enumerate(step_list):
+                                    if key == step_name:
+                                        next_step = list(step_list)[int(index) + 1]
+                                self.change_user_data(message=message, key_value={"Step-Name": next_step})
+                                self.base_messaging_logic(message=message, specific_content=self.bot_config["Step-Messaging"][title][start_message][next_step])
+                                break
                     
-                    # Media files sending logic
-                    for media_file_path, caption in self.bot_config["Step-Messaging"][start_message][step_name]["bot_media"].items():
-                        media_file_extension = os.path.splitext(media_file_path)[-1]
-                        with open(media_file_path, "rb") as media_file_rb:
-                            if media_file_extension in [".jpg", ".png", ".jpeg"]:
-                                self.bot.send_photo(chat_id=message.chat.id, photo=media_file_rb, caption=caption)
-                            elif media_file_extension in [".mp4", ".mov", ".webm"]:
-                                self.bot.send_video(chat_id=message.chat.id, video=media_file_rb, caption=caption)
-                            else:
-                                self.bot.send_document(chat_id=message.chat.id, document=media_file_rb, caption=caption)
+                    # If it's not a last step, continue chatting
+                    if not self.show_user_data(message)["Send-Last-Step-Message"]:
+                        self.base_messaging_logic(message=message, specific_content=self.bot_config["Step-Messaging"][title][start_message][step_name])
+                    # If it's a last step - send every user answer to administrator's ID if need
+                    else:
+                        if self.bot_config["Step-Messaging"][title][start_message][step_name]["send_to_admin"]:
+                            self.send_steps_to_admin(step_messaging_title=title, step_result=self.show_user_data(message)["Step-Result"])
+                            self.clean_user_media_directory(chat_id=message.chat.id)
 
-                    # Send text if it didn't sended, because media sended first   
-                    if self.bot_config["Step-Messaging"][start_message][step_name]["media_first"]:
-                        for text in self.bot_config["Step-Messaging"][start_message][step_name]["bot_text"]:
-                            self.bot.send_message(chat_id=message.chat.id, text=text, reply_markup=markup)
-
-                else:
-                    # Send text if media list is empty
-                    for text in self.bot_config["Step-Messaging"][start_message][step_name]["bot_text"]:
-                        self.bot.send_message(chat_id=message.chat.id, text=text, reply_markup=markup)
-
-                
-                # Update information for administrators from user messages
-                if message.text.strip() != start_message:
-                    self.update_step_results(message=message, step_messaging_title=step_messaging_title, step_data={step_name: message.text.strip()})
-
-                # If it'a a last step - stop step messaging, if not, change step name in user data and send result to administrators
-                if step_name == list(self.bot_config["Step-Messaging"][start_message])[-1]:
-                    self.change_user_data(message=message, key_value={
-                            "Last-Step": True,
-                        }
-                    )
-                    break
-
-                else:
-                    # Add second step into user-data
-                    next_step = ""
-                    step_list = self.bot_config["Step-Messaging"][start_message].keys()
-                    for index, key in enumerate(step_list):
-                        if key == step_name:
-                            next_step = list(step_list)[int(index) + 1]
-                    self.change_user_data(message=message, key_value={"Step-Name": next_step})
-
-
-                if self.show_user_data(message=message)["Last-Step"]:
-                    self.change_user_data(message=message, key_value={
-                            "Step-Enabled": False,
+                        self.change_user_data(message=message, key_value={
+                            "Send-Last-Step-Message": False,
+                            "Step-Messaging": False,
                             "Step-Name": None,
+                            "Step-Messaging-Title": None,
                             "Start-Step-Message": None,
-                            "Last-Step": False
-                        }
-                    )
-                    self.send_steps_to_admin(step_result=self.show_user_data(message=message)["Step-Result"], step_messaging_title=step_messaging_title)    
+                            "Step-Result": {
+                                # Step Messaging Title: {
+                                #   Step name: {user_answer: user_answer_type(text/media/etc...)}
+                                # }
+                            },
+                        })
+                        self.base_messaging_logic(message=message, specific_content=self.bot_config["Last-Step-Messages"][title])
+                    
+                else:
+                    if self.bot_config["Step-Messaging"][title][start_message][step_name]["send_to_admin"]:
+                        self.send_steps_to_admin(step_messaging_title=title, step_result=self.show_user_data(message)["Step-Result"])
+                        self.clean_user_media_directory(chat_id=message.chat.id)
+
+                    self.change_user_data(message=message, key_value={
+                        "Send-Last-Step-Message": False,
+                        "Step-Messaging": False,
+                        "Step-Name": None,
+                        "Step-Messaging-Title": None,
+                        "Start-Step-Message": None,
+                        "Step-Result": {
+                            # Step Messaging Title: {
+                            #   Step name: {user_answer: user_answer_type(text/media/etc...)}
+                            # }
+                        },
+                    })
+                    self.base_messaging_logic(message=message, specific_content=self.bot_config["Last-Step-Messages"][title])
                 
                 break
 
-
-
-    def init_command_operations(self):
+    def init_command_messaging_operations(self):
         """Init all commands messaging logic from base messaging logic method. Also update config and check user directories tree"""
         @self.bot.message_handler(commands=[command for command in self.bot_config["Commands"]])
         def command_handler(message):
             self.update_bot_config()
             self.check_user_directories(message=message)
-            self.messaging_logic(message=message, config_key="Commands", user_message=message.text.strip().replace('/', ''))
+            for command_name in self.bot_config["Commands"].keys():
+                if message.text.strip().replace("/", "") == command_name:
+                    self.base_messaging_logic(message=message, specific_content=self.bot_config["Commands"][command_name])
 
-
-    def init_message_operations(self):
+    def init_text_messaging_operations(self):
         "Init all messaging logic from base messaging logic method. For Step-Messaging it using another logic method."
         @self.bot.message_handler(content_types=['text'])
         def message_hadler(message):
+            self.update_bot_config()
+            self.check_user_directories(message=message)
+            step_messaging_titles = [title for title in self.bot_config["Step-Messaging"]]
 
+            # Turning on step mode in user data file if message from user exist in step-messaging-config
+            for title in step_messaging_titles:
+                if message.text.strip() in self.bot_config["Step-Messaging"][title] and not self.show_user_data(message)["Step-Messaging"]:
+                    first_step_name = list(self.bot_config["Step-Messaging"][title][message.text.strip()].keys())[0]
+                    self.change_user_data(message, {
+                            "Step-Messaging": True, 
+                            "Step-Messaging-Title": title,
+                            "Start-Step-Message": message.text.strip(),
+                            "Step-Name": first_step_name,
+                            "Step-Result": {
+                                title: {
+
+                                }
+                            }
+                        }
+                    )
+                    
+                    self.step_messaging_logic(message=message)
+                    return True
+
+            # Start step messaging if step-messaging mode is enabled
+            if self.show_user_data(message)["Step-Messaging"]:
+                self.step_messaging_logic(message=message)
+            else:
+                for msg_from_user in self.bot_config["Messaging"]:
+                    if message.text.strip() == msg_from_user:
+                        self.base_messaging_logic(message=message, specific_content=self.bot_config["Messaging"][msg_from_user])
+
+    def init_photo_messaging_operations(self):
+        "Init all messaging logic from base messaging logic method. For Step-Messaging it using another logic method."
+        @self.bot.message_handler(content_types=['photo'])
+        def message_hadler(message):
             self.update_bot_config()
             self.check_user_directories(message=message)
 
-            # Turning on step mode in user data file if message from user exist in step-messaging-config
-            if message.text.strip() in self.bot_config["Step-Messaging"] and not self.show_user_data(message)["Step-Enabled"]:
-                
-                self.change_user_data(message=message, key_value={"Step-Enabled": True, "Step-Start-Message": message.text.strip()})
+            file_path = self.bot.get_file(message.photo[-1].file_id).file_path
+            media_file = self.bot.download_file(file_path)
+            src = f"media/users-media-files/{message.chat.id}/" + file_path.split("/")[-1]
+            with open(src, "wb") as new_file:
+                new_file.write(media_file)
 
-            # Start step messaging if step-messaging mode is enabled
-            if self.show_user_data(message)["Step-Enabled"]:
-                self.step_messaging_logic(message=message)
-            else:
-                self.update_bot_config()
-                self.check_user_directories(message=message)
-                self.messaging_logic(message=message, config_key="Messaging", user_message=message.text.strip())
-                
+            if self.show_user_data(message)["Step-Messaging"]:
+                self.step_messaging_logic(message=message, content={"photo": src})
+
+    def init_voice_messaging_operations(self):
+        "Init all messaging logic from base messaging logic method. For Step-Messaging it using another logic method."
+        @self.bot.message_handler(content_types=['voice'])
+        def message_hadler(message):
+            self.update_bot_config()
+            self.check_user_directories(message=message)
+
+
+            file_path = self.bot.get_file(message.voice.file_id).file_path
+            media_file = self.bot.download_file(file_path)
+            src = f"media/users-media-files/{message.chat.id}/" + file_path.split("/")[-1]
+            with open(src, "wb") as new_file:
+                new_file.write(media_file)
+
+            if self.show_user_data(message)["Step-Messaging"]:
+                self.step_messaging_logic(message=message, content={"voice": src})
+
+    def init_contact_messaging_operations(self):
+        "Init all messaging logic from base messaging logic method. For Step-Messaging it using another logic method."
+        @self.bot.message_handler(content_types=['contact'])
+        def message_hadler(message):
+            self.update_bot_config()
+            self.check_user_directories(message=message)
+            if self.show_user_data(message)["Step-Messaging"]:
+                self.step_messaging_logic(message=message, content={"contact": message.contact.phone_number})
+
     def prepare(self):
         """Preparing config and messaging logic"""
         self.update_bot_config()
-        self.init_command_operations()
-        self.init_message_operations()
+        self.init_command_messaging_operations()
+        self.init_text_messaging_operations()
+        self.init_photo_messaging_operations()
+        self.init_contact_messaging_operations()
+        self.init_voice_messaging_operations()
 
     def start_bot_in_thread(self):
         """Preparing everything what program need and start bot in thread (self.bot_thread) for manipulation"""
@@ -329,16 +412,3 @@ class BotEngine:
 
 
 BotEngine().start_bot_in_thread()
-
-
-
-
-
-
-
-
-
-
-
-
-# Создай код, с проверкой на "Последнее сообщение" - избавишься от бага.
